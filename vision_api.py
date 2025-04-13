@@ -35,7 +35,7 @@ def process_pdf_page(image_path: str, api_key: Optional[str] = None) -> str:
             
             # 调用OpenAI视觉模型API
             response = client.chat.completions.create(
-                model="glm-4v-plus-0111",  # 使用支持视觉的模型
+                model="glm-4v-flash",  # 使用支持视觉的模型
                 messages=[
                     {
                         "role": "user",

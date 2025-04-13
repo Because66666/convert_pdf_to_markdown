@@ -39,7 +39,7 @@ def process_single_page(page_data):
     page_text = process_pdf_page(image_path, api_key)
     
     # 返回页码和处理结果
-    return page_num, f"## 第 {page_num + 1} 页\n\n{page_text}\n\n"
+    return page_num, f"\n\n{page_text}\n\n"
 
 
 def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, api_key: str = None, max_workers: int = None):
@@ -64,7 +64,6 @@ def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, api_key: str
     # 如果未指定输出路径，则使用PDF文件名
     if output_path is None:
         output_path = os.path.splitext(pdf_path)[0] + ".md"
-
     # 打开PDF文件
     try:
         pdf_document = fitz.open(pdf_path)
