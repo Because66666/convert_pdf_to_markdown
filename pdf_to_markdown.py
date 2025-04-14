@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import fitz  # PyMuPDF
 import concurrent.futures
+import imghdr
 from vision_api import process_pdf_page
 from dotenv import load_dotenv
 
@@ -40,6 +41,36 @@ def process_single_page(page_data):
     
     # 返回页码和处理结果
     return page_num, f"\n\n{page_text}\n\n"
+
+
+def process_image_file(image_path: str, output_path: str = None, api_key: str = None):
+    """
+    将图片文件转换为Markdown格式
+    
+    Args:
+        image_path: 图片文件路径
+        output_path: 输出的Markdown文件路径，如果为None则使用图片文件名
+        api_key: OpenAI API密钥
+    """
+    # 检查图片文件是否存在
+    if not os.path.exists(image_path):
+        print(f"错误：图片文件 '{image_path}' 不存在")
+        return
+    
+    # 如果未指定输出路径，则使用图片文件名
+    if output_path is None:
+        output_path = os.path.splitext(image_path)[0] + ".md"
+    
+    print(f"处理图片文件: {image_path}...")
+    
+    # 调用OpenAI视觉模型处理图像
+    image_text = process_pdf_page(image_path, api_key)
+    
+    # 写入Markdown文件
+    with open(output_path, "w", encoding="utf-8") as md_file:
+        md_file.write(f"\n\n{image_text}\n\n")
+    
+    print(f"转换完成！Markdown文件已保存到: {output_path}")
 
 
 def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, api_key: str = None, max_workers: int = None):
@@ -116,17 +147,74 @@ def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, api_key: str
         print(f"转换完成！Markdown文件已保存到: {output_path}")
 
 
+def process_file(file_path: str, output_path: str = None, api_key: str = None, max_workers: int = None):
+    """
+    处理单个文件（PDF或图片）
+    
+    Args:
+        file_path: 文件路径
+        output_path: 输出的Markdown文件路径
+        api_key: OpenAI API密钥
+        max_workers: 最大并发线程数
+    """
+    # 检查文件是否存在
+    if not os.path.exists(file_path):
+        print(f"错误：文件 '{file_path}' 不存在")
+        return
+    
+    # 检测文件类型
+    file_ext = os.path.splitext(file_path)[1].lower()
+    
+    # 图片文件扩展名列表
+    image_extensions = [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff"]
+    
+    # 根据文件类型调用相应的处理函数
+    if file_ext == ".pdf":
+        convert_pdf_to_markdown(file_path, output_path, api_key, max_workers)
+    elif file_ext in image_extensions:
+        process_image_file(file_path, output_path, api_key)
+    else:
+        # 尝试通过imghdr检测文件类型
+        img_type = imghdr.what(file_path)
+        if img_type:
+            process_image_file(file_path, output_path, api_key)
+        else:
+            print(f"错误：不支持的文件类型 '{file_ext}'")
+
+
+def process_files(file_paths, output_dir=None, api_key=None, max_workers=None):
+    """
+    批量处理多个文件
+    
+    Args:
+        file_paths: 文件路径列表
+        output_dir: 输出目录，如果为None则输出到与输入文件相同的目录
+        api_key: OpenAI API密钥
+        max_workers: 最大并发线程数
+    """
+    for file_path in file_paths:
+        # 如果指定了输出目录，则在该目录下创建输出文件
+        output_path = None
+        if output_dir:
+            output_filename = os.path.splitext(os.path.basename(file_path))[0] + ".md"
+            output_path = os.path.join(output_dir, output_filename)
+        
+        # 处理单个文件
+        process_file(file_path, output_path, api_key, max_workers)
+
+
 def main():
     # 解析命令行参数
-    parser = argparse.ArgumentParser(description="将PDF文件转换为Markdown格式")
-    parser.add_argument("pdf_path", help="PDF文件路径")
-    parser.add_argument("-o", "--output", help="输出的Markdown文件路径")
+    parser = argparse.ArgumentParser(description="将PDF文件或图片转换为Markdown格式")
+    parser.add_argument("file_paths", nargs="+", help="文件路径，支持PDF和常见图片格式（jpg, png等）")
+    parser.add_argument("-o", "--output-dir", help="输出目录，默认与输入文件相同目录")
     parser.add_argument("-k", "--api-key", help="OpenAI API密钥")
+    parser.add_argument("-w", "--workers", type=int, help="最大并发线程数，仅对PDF文件有效")
 
     args = parser.parse_args()
 
-    # 调用转换函数
-    convert_pdf_to_markdown(args.pdf_path, args.output, args.api_key)
+    # 调用处理函数
+    process_files(args.file_paths, args.output_dir, args.api_key, args.workers)
 
 
 if __name__ == "__main__":
