@@ -80,7 +80,7 @@ python pdf_to_markdown.py document.pdf -w 10
 ## 项目结构
 
 - `pdf_to_markdown.py`: 主程序，处理命令行参数、文件处理和转换逻辑
-- `vision_api.py`: 包含调用智谱AI视觉模型的函数和图像处理逻辑，如果需要更换厂商，可以改写这部分代码。
+- `vision_api.py`: 包含调用智谱AI视觉模型的函数和图像处理逻辑，如果需要更换厂商/改写提示词/更换视觉模型，可以改写这部分代码。
 - `app.py`: Gradio前端界面程序
 - `requirements.txt`: 项目依赖列表
 - `.env`: 环境变量配置文件，用于设置API密钥和并发线程数
