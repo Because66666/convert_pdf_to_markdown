@@ -38,7 +38,7 @@ def process_files_ui(files, output_dir=None):
     for file in files:
         try:
             # 获取文件名和路径
-            original_file_path = file.name
+            original_file_path = file if isinstance(file, str) else file.name
             file_name = os.path.basename(original_file_path)
             
             # 保存上传的文件到指定目录
@@ -96,7 +96,7 @@ with gr.Blocks(title="PDF转Markdown工具") as app:
     
     with gr.Row():
         with gr.Column():
-            file_input = gr.File(label="上传文件", file_types=[".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff"], file_count="multiple")
+            file_input = gr.Files(label="上传文件", file_types=[".pdf", ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff"], type="filepath")
             convert_btn = gr.Button("开始转换", variant="primary")
             result = gr.Textbox(label="转换结果", lines=5)
         

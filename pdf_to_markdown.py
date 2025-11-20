@@ -6,6 +6,8 @@ import tempfile
 import fitz  # PyMuPDF
 import concurrent.futures
 import imghdr
+from queue import Queue
+from tqdm import tqdm
 from vision_api import process_pdf_page
 from dotenv import load_dotenv
 
@@ -29,7 +31,7 @@ def process_single_page(page_data):
     api_key = page_data['api_key']
     total_pages = page_data['total_pages']
     
-    print(f"处理第 {page_num + 1} 页，共 {total_pages} 页...")
+    # print(f"处理第 {page_num + 1} 页，共 {total_pages} 页...")
     
     # 将页面渲染为图像
     image_path = os.path.join(temp_dir, f"page_{page_num + 1}.png")
@@ -104,32 +106,51 @@ def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, api_key: str
 
     # 创建临时目录存储页面图像
     with tempfile.TemporaryDirectory() as temp_dir:
-        # 准备页面处理任务
         total_pages = len(pdf_document)
-        page_tasks = []
-        
+        page_tasks = Queue()
         for page_num, page in enumerate(pdf_document):
-            page_tasks.append({
+            page_tasks.put({
                 'page_num': page_num,
                 'page': page,
                 'temp_dir': temp_dir,
                 'api_key': api_key,
                 'total_pages': total_pages
             })
-        
-        # 使用线程池并发处理页面
+
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 提交所有任务并获取Future对象
-            future_to_page = {executor.submit(process_single_page, task): task for task in page_tasks}
-            
-            # 获取结果
-            for future in concurrent.futures.as_completed(future_to_page):
-                try:
-                    page_num, page_content = future.result()
-                    results.append((page_num, page_content))
-                except Exception as e:
-                    print(f"处理页面时出错: {str(e)}")
+            future_to_page = {}
+            while not page_tasks.empty() and len(future_to_page) < max_workers:
+                task = page_tasks.get()
+                future = executor.submit(process_single_page, task)
+                future_to_page[future] = task
+
+            processed_success = 0
+            with tqdm(total=total_pages, desc="页面处理进度", unit="页") as pbar:
+                while processed_success < total_pages:
+                    while not page_tasks.empty() and len(future_to_page) < max_workers:
+                        task = page_tasks.get()
+                        future = executor.submit(process_single_page, task)
+                        future_to_page[future] = task
+
+                    if not future_to_page and page_tasks.empty():
+                        break
+
+                    for future in concurrent.futures.as_completed(list(future_to_page.keys())):
+                        task = future_to_page.pop(future)
+                        try:
+                            page_num, page_content = future.result()
+                            results.append((page_num, page_content))
+                            processed_success += 1
+                            pbar.update(1)
+                        except Exception as e:
+                            print(f"处理页面时出错: {str(e)}，正在重试该页面 {task['page_num'] + 1}")
+                            page_tasks.put(task)
+
+                        while not page_tasks.empty() and len(future_to_page) < max_workers:
+                            next_task = page_tasks.get()
+                            next_future = executor.submit(process_single_page, next_task)
+                            future_to_page[next_future] = next_task
         
         # 按页码顺序组装Markdown内容
         results.sort(key=lambda x: x[0])  # 按页码排序
