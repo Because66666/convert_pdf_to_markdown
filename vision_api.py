@@ -49,7 +49,7 @@ def process_pdf_page(image_path: str, api_key: Optional[str] = None) -> str:
                                     "url": base64_image
                                 }
                             },
-                            {"type": "text", "text": "请原文输出，不需要解释。请忽略页码、页眉和页脚以及页面下方关于夸克扫描王的有关内容。公式等字符使用标准latex格式进行输出。如果页面为英文，准确翻译后输出。"}
+                            {"type": "text", "text": "请原文输出，不需要解释。请忽略页码、页眉和页脚以及页面下方关于夸克扫描王的有关内容。公式等字符使用标准latex格式进行输出。如果页面为英文，请"}
                         ]
                     }
                 ],
