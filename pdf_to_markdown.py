@@ -45,7 +45,7 @@ def process_single_page(page_data):
     return page_num, f"\n\n{page_text}\n\n"
 
 
-def process_image_file(image_path: str, output_path: str = None, api_key: str = None):
+def process_image_file(image_path: str, output_path: str|None = None, api_key: str|None = None):
     """
     将图片文件转换为Markdown格式
     
@@ -75,7 +75,7 @@ def process_image_file(image_path: str, output_path: str = None, api_key: str = 
     print(f"转换完成！Markdown文件已保存到: {output_path}")
 
 
-def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, api_key: str = None, max_workers: int = None):
+def convert_pdf_to_markdown(pdf_path: str, output_path: str|None = None, api_key: str|None = None, max_workers: int|None = None):
     """
     将PDF文件转换为Markdown格式
     
@@ -108,7 +108,8 @@ def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, api_key: str
     with tempfile.TemporaryDirectory() as temp_dir:
         total_pages = len(pdf_document)
         page_tasks = Queue()
-        for page_num, page in enumerate(pdf_document):
+        for page_num in range(pdf_document.page_count):
+            page = pdf_document.load_page(page_num)
             page_tasks.put({
                 'page_num': page_num,
                 'page': page,
@@ -168,7 +169,7 @@ def convert_pdf_to_markdown(pdf_path: str, output_path: str = None, api_key: str
         print(f"转换完成！Markdown文件已保存到: {output_path}")
 
 
-def process_file(file_path: str, output_path: str = None, api_key: str = None, max_workers: int = None):
+def process_file(file_path: str, output_path: str|None = None, api_key: str|None = None, max_workers: int|None = None):
     """
     处理单个文件（PDF或图片）
     
