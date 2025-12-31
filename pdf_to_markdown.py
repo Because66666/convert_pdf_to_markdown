@@ -10,6 +10,7 @@ from queue import Queue
 from tqdm import tqdm
 from vision_api import process_pdf_page
 from dotenv import load_dotenv
+from pptx import Presentation
 
 # 加载环境变量
 load_dotenv()
@@ -43,6 +44,84 @@ def process_single_page(page_data):
     
     # 返回页码和处理结果
     return page_num, f"\n\n{page_text}\n\n"
+
+
+def process_single_slide(slide_data):
+    """
+    处理单个PPT幻灯片
+    
+    Args:
+        slide_data: 包含幻灯片处理所需数据的字典
+        
+    Returns:
+        包含幻灯片编号和处理结果的元组
+    """
+    slide_num = slide_data['slide_num']
+    slide = slide_data['slide']
+    temp_dir = slide_data['temp_dir']
+    api_key = slide_data['api_key']
+    total_slides = slide_data['total_slides']
+    
+    # 将幻灯片渲染为图像
+    image_path = os.path.join(temp_dir, f"slide_{slide_num + 1}.png")
+    
+    # 尝试使用win32com导出幻灯片（仅Windows）
+    try:
+        import win32com.client
+        import pythoncom
+        
+        # 尝试初始化COM（如果尚未初始化）
+        try:
+            pythoncom.CoInitialize()
+        except Exception:
+            pass  # COM可能已经初始化，忽略错误
+        
+        powerpoint = win32com.client.Dispatch("PowerPoint.Application")
+        powerpoint.Visible = False
+        
+        presentation = powerpoint.Presentations.Open(os.path.abspath(slide_data['ppt_path']))
+        presentation.Slides[slide_num + 1].Export(image_path, "PNG")
+        
+        presentation.Close()
+        powerpoint.Quit()
+        
+        # 反初始化COM
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
+        
+    except Exception:
+        # 备用方法：使用PIL创建包含幻灯片文本的图像
+        from PIL import Image, ImageDraw, ImageFont
+        
+        img = Image.new('RGB', (960, 720), color='white')
+        draw = ImageDraw.Draw(img)
+        
+        # 获取幻灯片中的文本
+        slide_text = ""
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                slide_text += shape.text + "\n"
+        
+        # 在图像上绘制文本
+        try:
+            font = ImageFont.truetype("arial.ttf", 20)
+        except:
+            font = ImageFont.load_default()
+        
+        y_offset = 50
+        for line in slide_text.split('\n')[:20]:
+            draw.text((50, y_offset), line, fill='black', font=font)
+            y_offset += 30
+        
+        img.save(image_path)
+    
+    # 调用OpenAI视觉模型处理图像
+    slide_text = process_pdf_page(image_path, api_key)
+    
+    # 返回幻灯片编号和处理结果
+    return slide_num, f"\n\n{slide_text}\n\n"
 
 
 def process_image_file(image_path: str, output_path: str|None = None, api_key: str|None = None):
@@ -169,9 +248,103 @@ def convert_pdf_to_markdown(pdf_path: str, output_path: str|None = None, api_key
         print(f"转换完成！Markdown文件已保存到: {output_path}")
 
 
+def convert_ppt_to_markdown(ppt_path: str, output_path: str|None = None, api_key: str|None = None, max_workers: int|None = None):
+    """
+    将PPT/PPTX文件转换为Markdown格式
+    
+    Args:
+        ppt_path: PPT/PPTX文件路径
+        output_path: 输出的Markdown文件路径，如果为None则使用PPT文件名
+        api_key: OpenAI API密钥
+        max_workers: 最大并发线程数，如果为None则从环境变量获取
+    """
+    # 如果未指定max_workers，则从环境变量获取，默认为5
+    if max_workers is None:
+        max_workers = int(os.environ.get("MAX_WORKERS", 5))
+
+    # 检查PPT文件是否存在
+    if not os.path.exists(ppt_path):
+        print(f"错误：PPT文件 '{ppt_path}' 不存在")
+        return
+
+    # 如果未指定输出路径，则使用PPT文件名
+    if output_path is None:
+        output_path = os.path.splitext(ppt_path)[0] + ".md"
+    
+    # 打开PPT文件
+    try:
+        presentation = Presentation(ppt_path)
+    except Exception as e:
+        print(f"打开PPT文件时出错: {str(e)}")
+        return
+
+    # 创建临时目录存储幻灯片图像
+    with tempfile.TemporaryDirectory() as temp_dir:
+        total_slides = len(presentation.slides)
+        slide_tasks = Queue()
+        
+        # 准备所有幻灯片任务
+        for slide_num, slide in enumerate(presentation.slides):
+            slide_tasks.put({
+                'slide_num': slide_num,
+                'slide': slide,
+                'temp_dir': temp_dir,
+                'api_key': api_key,
+                'total_slides': total_slides,
+                'ppt_path': ppt_path
+            })
+
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_slide = {}
+            while not slide_tasks.empty() and len(future_to_slide) < max_workers:
+                task = slide_tasks.get()
+                future = executor.submit(process_single_slide, task)
+                future_to_slide[future] = task
+
+            processed_success = 0
+            with tqdm(total=total_slides, desc="幻灯片处理进度", unit="页") as pbar:
+                while processed_success < total_slides:
+                    while not slide_tasks.empty() and len(future_to_slide) < max_workers:
+                        task = slide_tasks.get()
+                        future = executor.submit(process_single_slide, task)
+                        future_to_slide[future] = task
+
+                    if not future_to_slide and slide_tasks.empty():
+                        break
+
+                    for future in concurrent.futures.as_completed(list(future_to_slide.keys())):
+                        task = future_to_slide.pop(future)
+                        try:
+                            slide_num, slide_content = future.result()
+                            results.append((slide_num, slide_content))
+                            processed_success += 1
+                            pbar.update(1)
+                        except Exception as e:
+                            print(f"处理幻灯片时出错: {str(e)}，正在重试该幻灯片 {task['slide_num'] + 1}")
+                            slide_tasks.put(task)
+
+                        while not slide_tasks.empty() and len(future_to_slide) < max_workers:
+                            next_task = slide_tasks.get()
+                            next_future = executor.submit(process_single_slide, next_task)
+                            future_to_slide[next_future] = next_task
+        
+        # 按幻灯片顺序组装Markdown内容
+        results.sort(key=lambda x: x[0])
+        markdown_content = ""
+        for _, content in results:
+            markdown_content += content
+
+        # 写入Markdown文件
+        with open(output_path, "w", encoding="utf-8") as md_file:
+            md_file.write(markdown_content)
+
+        print(f"转换完成！Markdown文件已保存到: {output_path}")
+
+
 def process_file(file_path: str, output_path: str|None = None, api_key: str|None = None, max_workers: int|None = None):
     """
-    处理单个文件（PDF或图片）
+    处理单个文件（PDF、PPT或图片）
     
     Args:
         file_path: 文件路径
@@ -190,9 +363,14 @@ def process_file(file_path: str, output_path: str|None = None, api_key: str|None
     # 图片文件扩展名列表
     image_extensions = [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff"]
     
+    # PPT文件扩展名列表
+    ppt_extensions = [".ppt", ".pptx"]
+    
     # 根据文件类型调用相应的处理函数
     if file_ext == ".pdf":
         convert_pdf_to_markdown(file_path, output_path, api_key, max_workers)
+    elif file_ext in ppt_extensions:
+        convert_ppt_to_markdown(file_path, output_path, api_key, max_workers)
     elif file_ext in image_extensions:
         process_image_file(file_path, output_path, api_key)
     else:
@@ -227,11 +405,11 @@ def process_files(file_paths, output_dir=None, api_key=None, max_workers=None):
 
 def main():
     # 解析命令行参数
-    parser = argparse.ArgumentParser(description="将PDF文件或图片转换为Markdown格式")
-    parser.add_argument("file_paths", nargs="+", help="文件路径，支持PDF和常见图片格式（jpg, png等）")
+    parser = argparse.ArgumentParser(description="将PDF、PPT文件或图片转换为Markdown格式")
+    parser.add_argument("file_paths", nargs="+", help="文件路径，支持PDF、PPT/PPTX和常见图片格式（jpg, png等）")
     parser.add_argument("-o", "--output-dir", help="输出目录，默认与输入文件相同目录")
     parser.add_argument("-k", "--api-key", help="OpenAI API密钥")
-    parser.add_argument("-w", "--workers", type=int, help="最大并发线程数，仅对PDF文件有效")
+    parser.add_argument("-w", "--workers", type=int, help="最大并发线程数，仅对PDF和PPT文件有效")
 
     args = parser.parse_args()
 

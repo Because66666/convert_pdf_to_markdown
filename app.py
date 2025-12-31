@@ -138,7 +138,7 @@ with gr.Blocks(title="PDF转Markdown工具") as app:
     
     gr.Markdown("""
     ## 使用说明
-    1. 上传文件（支持PDF和常见图片格式：JPG、PNG、BMP、GIF、TIFF等）
+    1. 上传文件（支持PDF和常见图片格式：JPG、PNG、BMP、GIF、TIFF、PPT、PPTX等）
     2. 可以一次上传多个文件进行批量处理
     3. 点击"开始转换"按钮
     4. 转换完成后，右侧会显示生成的Markdown内容（显示第一个成功处理的文件）
